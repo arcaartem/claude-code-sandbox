@@ -1,0 +1,61 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+AGENT.md
+LICENSE.md
+
+# CI/CD
+.github/
+
+# Security config files
+.trivyignore
+.grype.yaml
+.checkov.yaml
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Build artifacts and temp files
+*.tar
+image.tar
+dist/
+build/
+out/
+tmp/
+temp/
+coverage/
+.nyc_output
+
+# Dependencies (should be installed in container)
+node_modules/
+.npm
+.yarn-integrity
+
+# Environment files
+.env*
+
+# Security scan results
+*.sarif
+
+# Test files
+testfile.txt

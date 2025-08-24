@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  IMAGE_NAME: devenv
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ env.IMAGE_NAME }}:test .
+
+    - name: Test basic functionality
+      run: |
+        # Test that the container starts and has expected tools
+        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "which mise"
+        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "which claude"
+        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "which git"
+        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "whoami"
+        
+        # Test that mise works
+        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "mise --version"
+        
+        # Test that claude is available
+        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "claude --version"
+        
+        # Test workspace mounting
+        echo "test file" > testfile.txt
+        docker run --rm -v $(pwd):/workspace ${{ env.IMAGE_NAME }}:test bash -c "ls -la /workspace/testfile.txt"
+        rm testfile.txt
+
+    - name: Quick security scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: '${{ env.IMAGE_NAME }}:test'
+        format: 'table'
+        exit-code: '1'
+        severity: 'CRITICAL,HIGH'

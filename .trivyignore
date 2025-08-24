@@ -1,0 +1,7 @@
+# Ignore linux-pam vulnerability - no newer version available in Alpine 3.22/edge
+# Remove this ignore when upgrading to a newer Alpine version that has a fix
+CVE-2024-22365
+
+# Ignore binutils vulnerability - newer version has high severity vulnerability without solution
+# Keep stable version 2.44-r2 until secure fix is available
+CVE-2023-XXXXX
