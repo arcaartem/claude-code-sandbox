@@ -1,6 +1,9 @@
 # Use Alpine Linux for minimal footprint
 FROM alpine:3.22
 
+# Set shell to bash with pipefail for better error handling
+SHELL ["/bin/ash", "-o", "pipefail", "-c"]
+
 # Set environment variables
 ENV USER=developer \
     UID=1000 \
@@ -8,17 +11,35 @@ ENV USER=developer \
     HOME=/home/developer \
     WORKSPACE=/workspace
 
-# Install essential packages
+# Install essential packages from stable repo
 RUN apk add --no-cache \
     bash \
     curl \
-    git \
     ca-certificates \
     tzdata \
     sudo \
     shadow \
     openssl \
-    build-base \
+    make \
+    patch \
+    fortify-headers \
+    gcc \
+    g++ \
+    musl-dev \
+    libstdc++-dev \
+    binutils \
+    && rm -rf /var/cache/apk/*
+
+# Add edge repositories and upgrade specific vulnerable packages
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
+    echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
+    apk update && \
+    apk add --upgrade --no-cache \
+    git \
+    linux-pam \
+    busybox \
+    ssl_client \
+    busybox-binsh \
     && rm -rf /var/cache/apk/*
 
 # Create workspace directory
@@ -42,15 +63,14 @@ USER ${USER}
 # Create .local/bin directory
 RUN mkdir -p ${HOME}/.local/bin
 
-# Install mise as the developer user
+# Install mise and Claude Code as the developer user
 RUN curl https://mise.run | MISE_INSTALL_PATH=${HOME}/.local/bin/mise bash && \
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ${HOME}/.bashrc && \
-    echo 'eval "$(~/.local/bin/mise activate bash)"' >> ${HOME}/.bashrc
-
-# Install Claude Code as the developer user
-RUN curl -fsSL https://claude.ai/install.sh | bash && \
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ${HOME}/.bashrc
+    echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ${HOME}/.bashrc && \
+    echo "eval \"\$(~/.local/bin/mise activate bash)\"" >> ${HOME}/.bashrc && \
+    curl -fsSL https://claude.ai/install.sh | bash && \
+    echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ${HOME}/.bashrc
 WORKDIR ${WORKSPACE}
+
 
 # Set entrypoint
 ENTRYPOINT ["/home/developer/entrypoint.sh"]

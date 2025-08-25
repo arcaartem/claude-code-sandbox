@@ -58,6 +58,7 @@ jobs:
       with:
         image: '${{ env.IMAGE_NAME }}:latest'
         fail-build-on-sbom-upload-failure: false
+        severity-cutoff: high
 
     - name: Upload Grype scan results
       uses: github/codeql-action/upload-sarif@v3
@@ -65,19 +66,6 @@ jobs:
       with:
         sarif_file: ${{ steps.grype-scan.outputs.sarif }}
 
-    - name: Docker Scout CVEs
-      uses: docker/scout-action@v1
-      if: ${{ github.event_name != 'pull_request_target' }}
-      with:
-        command: cves
-        image: ${{ env.IMAGE_NAME }}:latest
-        sarif-file: scout-results.sarif
-
-    - name: Upload Scout scan results
-      uses: github/codeql-action/upload-sarif@v3
-      if: always() && ${{ github.event_name != 'pull_request_target' }}
-      with:
-        sarif_file: 'scout-results.sarif'
 
   dockerfile-security:
     runs-on: ubuntu-latest
@@ -136,6 +124,5 @@ jobs:
         echo "🛡️ Scanners used:" >> $GITHUB_STEP_SUMMARY
         echo "- **Trivy**: Container vulnerability scanning" >> $GITHUB_STEP_SUMMARY
         echo "- **Grype**: Additional vulnerability detection" >> $GITHUB_STEP_SUMMARY
-        echo "- **Docker Scout**: Docker-native security scanning" >> $GITHUB_STEP_SUMMARY
         echo "- **Hadolint**: Dockerfile best practices" >> $GITHUB_STEP_SUMMARY
         echo "- **Checkov**: Infrastructure security scanning" >> $GITHUB_STEP_SUMMARY

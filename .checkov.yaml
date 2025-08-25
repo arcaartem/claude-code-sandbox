@@ -1,0 +1,6 @@
+# Checkov configuration file
+skip-check:
+  # Skip sudo check for development container - sudo access is needed for developer workflow
+  - CKV_DOCKER_9
+  # Skip healthcheck check for interactive development container
+  - CKV_DOCKER_2
