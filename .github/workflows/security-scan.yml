@@ -53,7 +53,7 @@ jobs:
         format: 'table'
 
     - name: Scan with Grype
-      uses: anchore/scan-action@v4
+      uses: anchore/scan-action@v6
       id: grype-scan
       with:
         image: '${{ env.IMAGE_NAME }}:latest'
