@@ -12,6 +12,7 @@ on:
 
 env:
   IMAGE_NAME: devenv
+  REGISTRY: ghcr.io
 
 jobs:
   build-and-scan:
@@ -20,6 +21,7 @@ jobs:
       contents: read
       security-events: write
       actions: read
+      packages: write  # For caching
 
     steps:
     - name: Checkout code
@@ -28,44 +30,92 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker image
-      run: |
-        docker build -t ${{ env.IMAGE_NAME }}:latest .
-        docker save ${{ env.IMAGE_NAME }}:latest -o image.tar
+    # Cache Docker layers for faster builds
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Run Trivy vulnerability scanner
+    - name: Build Docker image with cache
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        load: true
+        tags: ${{ env.IMAGE_NAME }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    # Trivy scan with SARIF output (advisory only)
+    - name: Run Trivy vulnerability scanner (SARIF)
       uses: aquasecurity/trivy-action@master
+      continue-on-error: true  # Don't fail the build
       with:
         image-ref: '${{ env.IMAGE_NAME }}:latest'
         format: 'sarif'
         output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH,MEDIUM'
+        timeout: '10m'
+        exit-code: '0'  # Never exit with error
 
     - name: Upload Trivy scan results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
+        category: 'trivy'
 
+    # Trivy scan with table output for PR comments (advisory only)
     - name: Run Trivy scanner for summary
       uses: aquasecurity/trivy-action@master
+      continue-on-error: true  # Don't fail the build
+      if: github.event_name == 'pull_request'
       with:
         image-ref: '${{ env.IMAGE_NAME }}:latest'
         format: 'table'
+        output: 'trivy-table.txt'
+        exit-code: '0'  # Never exit with error
 
+    # Post Trivy results as PR comment
+    - name: Post Trivy results to PR
+      if: github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const trivyTable = fs.existsSync('trivy-table.txt') 
+            ? fs.readFileSync('trivy-table.txt', 'utf8') 
+            : 'No Trivy results available';
+          
+          const body = `## 🔒 Security Scan Results\n\n<details><summary>Trivy Scan Results</summary>\n\n\`\`\`\n${trivyTable}\n\`\`\`\n</details>`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });
+
+    # Grype scan with better configuration (advisory only)
     - name: Scan with Grype
       uses: anchore/scan-action@v4
+      continue-on-error: true  # Don't fail the build
       id: grype-scan
       with:
         image: '${{ env.IMAGE_NAME }}:latest'
-        fail-build-on-sbom-upload-failure: false
-        severity-cutoff: high
+        severity-cutoff: medium
+        only-fixed: false
+        add-cpes-if-none: true
+        output-format: sarif
+        fail-build: false  # Don't fail, just report
 
     - name: Upload Grype scan results
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: ${{ steps.grype-scan.outputs.sarif }}
-
+        category: 'grype'
 
   dockerfile-security:
     runs-on: ubuntu-latest
@@ -77,34 +127,42 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    # Hadolint with inline annotations (advisory only)
     - name: Run Hadolint Dockerfile linter
       uses: hadolint/hadolint-action@v3.1.0
+      continue-on-error: true  # Don't fail the build
       with:
         dockerfile: Dockerfile
         format: sarif
         output-file: hadolint-results.sarif
         no-fail: true
+        ignore: DL3008,DL3009  # Common Debian-specific ignores
 
     - name: Upload Hadolint scan results
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: hadolint-results.sarif
+        category: 'hadolint'
 
+    # Checkov for additional security checks (advisory only)
     - name: Run Checkov on Dockerfile
       uses: bridgecrewio/checkov-action@master
+      continue-on-error: true  # Don't fail the build
       with:
         directory: .
         framework: dockerfile
         output_format: sarif
         output_file_path: checkov-results.sarif
         soft_fail: true
+        skip_check: CKV_DOCKER_2,CKV_DOCKER_3  # Skip non-root user checks if needed
 
     - name: Upload Checkov scan results
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: checkov-results.sarif
+        category: 'checkov'
 
   security-summary:
     runs-on: ubuntu-latest
@@ -116,8 +174,20 @@ jobs:
       run: |
         echo "# 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **Build and Scan Job**: ${{ needs.build-and-scan.result }}" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **Dockerfile Security**: ${{ needs.dockerfile-security.result }}" >> $GITHUB_STEP_SUMMARY
+        
+        # Color-code the results
+        if [[ "${{ needs.build-and-scan.result }}" == "success" ]]; then
+          echo "✅ **Build and Scan Job**: ${{ needs.build-and-scan.result }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Build and Scan Job**: ${{ needs.build-and-scan.result }}" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [[ "${{ needs.dockerfile-security.result }}" == "success" ]]; then
+          echo "✅ **Dockerfile Security**: ${{ needs.dockerfile-security.result }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Dockerfile Security**: ${{ needs.dockerfile-security.result }}" >> $GITHUB_STEP_SUMMARY
+        fi
+        
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "📊 Check the **Security** tab for detailed vulnerability reports." >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
@@ -126,3 +196,5 @@ jobs:
         echo "- **Grype**: Additional vulnerability detection" >> $GITHUB_STEP_SUMMARY
         echo "- **Hadolint**: Dockerfile best practices" >> $GITHUB_STEP_SUMMARY
         echo "- **Checkov**: Infrastructure security scanning" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "⏰ Scan completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

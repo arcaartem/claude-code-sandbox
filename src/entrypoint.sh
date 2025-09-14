@@ -6,8 +6,9 @@ log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" >&2
 }
 
-# Set up PATH
+# Set up PATH and activate mise
 export PATH="$HOME/.local/bin:$PATH"
+eval "$(~/.local/bin/mise activate bash)"
 
 # Change to workspace directory
 cd /workspace

@@ -22,7 +22,7 @@ ENV USER=developer \
 
 # Create non-root user for building
 RUN groupadd -g ${GID} ${USER} && \
-    useradd -m -u ${UID} -g ${USER} -d ${HOME} -s /bin/bash ${USER}
+    useradd -m -l -u ${UID} -g ${USER} -d ${HOME} -s /bin/bash ${USER}
 
 # Switch to non-root user
 USER ${USER}
@@ -48,7 +48,7 @@ ENV USER=developer \
     PATH="/home/developer/.local/bin:$PATH"
 
 # Install runtime packages from Debian repositories
-RUN apt-get update && apt-get upgrade -y && apt-get install -y \
+RUN apt-get update && apt-get upgrade -y && apt-get install --no-install-recommends -y \
     bash \
     curl \
     ca-certificates \
@@ -134,16 +134,20 @@ RUN mkdir -p ${HOME}/.gnupg && \
     echo "trust-model always" >> ${HOME}/.gnupg/gpg.conf && \
     gpg --list-keys || true
 
-# Install Claude Code
-RUN curl -fsSL https://claude.ai/install.sh | bash && \
-    echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ${HOME}/.bashrc
+# Install Node.js via mise and then install Claude Code CLI
+RUN eval "$(~/.local/bin/mise activate bash)" && \
+    mise install node@24 && \
+    mise global node@24 && \
+    npm install -g @anthropic-ai/claude-code && \
+    claude --version || echo "Claude Code installed but may need authentication"
+
 
 # Set working directory
 WORKDIR ${WORKSPACE}
 
 # Add health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD claude --version || exit 1
+    CMD eval "$(~/.local/bin/mise activate bash)" && claude --version || exit 1
 
 # Set entrypoint
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

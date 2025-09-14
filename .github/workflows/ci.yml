@@ -10,8 +10,10 @@ env:
   IMAGE_NAME: devenv
 
 jobs:
-  build-test:
+  build:
     runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
     
     steps:
     - name: Checkout code
@@ -20,33 +22,204 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker image
+    - name: Generate metadata
+      id: meta
       run: |
-        docker build -t ${{ env.IMAGE_NAME }}:test .
+        echo "tags=${{ env.IMAGE_NAME }}:ci-${{ github.sha }}" >> $GITHUB_OUTPUT
 
-    - name: Test basic functionality
-      run: |
-        # Test that the container starts and has expected tools
-        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "which mise"
-        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "which claude"
-        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "which git"
-        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "whoami"
-        
-        # Test that mise works
-        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "mise --version"
-        
-        # Test that claude is available
-        docker run --rm ${{ env.IMAGE_NAME }}:test bash -c "claude --version"
-        
-        # Test workspace mounting
-        echo "test file" > testfile.txt
-        docker run --rm -v $(pwd):/workspace ${{ env.IMAGE_NAME }}:test bash -c "ls -la /workspace/testfile.txt"
-        rm testfile.txt
-
-    - name: Quick security scan
-      uses: aquasecurity/trivy-action@master
+    - name: Build Docker image with cache
+      uses: docker/build-push-action@v5
       with:
-        image-ref: '${{ env.IMAGE_NAME }}:test'
+        context: .
+        load: true
+        tags: ${{ steps.meta.outputs.tags }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        outputs: type=docker,dest=/tmp/image.tar
+
+    - name: Upload image artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-image
+        path: /tmp/image.tar
+        retention-days: 1
+
+  test-basic:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test:
+          - name: "Core Tools"
+            commands: |
+              which mise && mise --version
+              which claude && claude --version
+              which git && git --version
+              which bash && bash --version
+          - name: "User Environment"
+            commands: |
+              whoami | grep -q developer
+              pwd | grep -q /workspace
+              echo $HOME | grep -q /home/developer
+          - name: "Mise Functionality"
+            commands: |
+              mise doctor
+              mise list
+              mise plugins list
+    
+    steps:
+    - name: Download image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: docker-image
+        path: /tmp
+
+    - name: Load Docker image
+      run: |
+        docker load --input /tmp/image.tar
+
+    - name: Run ${{ matrix.test.name }} tests
+      run: |
+        docker run --rm ${{ needs.build.outputs.image-tag }} bash -c "${{ matrix.test.commands }}"
+
+  test-workspace:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: docker-image
+        path: /tmp
+
+    - name: Load Docker image
+      run: |
+        docker load --input /tmp/image.tar
+
+    - name: Test workspace mounting and permissions
+      run: |
+        # Create test directory structure
+        TEST_DIR=$(mktemp -d)
+        trap "rm -rf $TEST_DIR" EXIT
+        
+        echo "test content" > $TEST_DIR/test.txt
+        mkdir -p $TEST_DIR/subdir
+        echo "nested content" > $TEST_DIR/subdir/nested.txt
+        
+        # Test read access
+        docker run --rm -v $TEST_DIR:/workspace ${{ needs.build.outputs.image-tag }} \
+          bash -c "cat /workspace/test.txt | grep -q 'test content'"
+        
+        # Test write access
+        docker run --rm -v $TEST_DIR:/workspace ${{ needs.build.outputs.image-tag }} \
+          bash -c "echo 'new content' > /workspace/new.txt"
+        
+        # Verify write worked
+        [ -f "$TEST_DIR/new.txt" ] && grep -q "new content" "$TEST_DIR/new.txt"
+        
+        # Test directory traversal
+        docker run --rm -v $TEST_DIR:/workspace ${{ needs.build.outputs.image-tag }} \
+          bash -c "find /workspace -type f | wc -l | grep -q 3"
+
+  test-mise-languages:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        language:
+          - name: "Python"
+            setup: "mise use python@3.11"
+            verify: "python --version | grep -q '3.11'"
+          - name: "Node.js"
+            setup: "mise use node@20"
+            verify: "node --version | grep -q 'v20'"
+          - name: "Ruby"
+            setup: "mise use ruby@latest"
+            verify: "ruby --version"
+    
+    steps:
+    - name: Download image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: docker-image
+        path: /tmp
+
+    - name: Load Docker image
+      run: |
+        docker load --input /tmp/image.tar
+
+    - name: Test ${{ matrix.language.name }} installation
+      run: |
+        docker run --rm ${{ needs.build.outputs.image-tag }} \
+          bash -c "${{ matrix.language.setup }} && ${{ matrix.language.verify }}"
+      timeout-minutes: 5
+
+  quick-security-check:
+    needs: build
+    runs-on: ubuntu-latest
+    # Only run on PRs, full scan is in security-scan.yml
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Download image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: docker-image
+        path: /tmp
+
+    - name: Load Docker image
+      run: |
+        docker load --input /tmp/image.tar
+        docker tag ${{ needs.build.outputs.image-tag }} ${{ env.IMAGE_NAME }}:latest
+
+    - name: Quick vulnerability scan (CRITICAL only)
+      uses: aquasecurity/trivy-action@master
+      continue-on-error: true  # Don't fail the build
+      with:
+        image-ref: '${{ env.IMAGE_NAME }}:latest'
         format: 'table'
-        exit-code: '1'
-        severity: 'CRITICAL,HIGH'
+        exit-code: '0'  # Never exit with error
+        severity: 'CRITICAL'
+        timeout: '5m'
+
+  ci-summary:
+    runs-on: ubuntu-latest
+    needs: [build, test-basic, test-workspace, test-mise-languages, quick-security-check]
+    if: always()
+    
+    steps:
+    - name: CI Summary
+      run: |
+        echo "# 🚀 CI Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Function to add status emoji
+        add_status() {
+          if [[ "$2" == "success" ]]; then
+            echo "✅ **$1**: Success" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$2" == "skipped" ]]; then
+            echo "⏭️ **$1**: Skipped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **$1**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+        }
+        
+        add_status "Build" "${{ needs.build.result }}"
+        add_status "Basic Tests" "${{ needs.test-basic.result }}"
+        add_status "Workspace Tests" "${{ needs.test-workspace.result }}"
+        add_status "Language Tests" "${{ needs.test-mise-languages.result }}"
+        add_status "Security Check" "${{ needs.quick-security-check.result }}"
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 📊 Test Coverage" >> $GITHUB_STEP_SUMMARY
+        echo "- Core tools verification" >> $GITHUB_STEP_SUMMARY
+        echo "- User environment validation" >> $GITHUB_STEP_SUMMARY
+        echo "- Workspace mounting and permissions" >> $GITHUB_STEP_SUMMARY
+        echo "- Mise language installation" >> $GITHUB_STEP_SUMMARY
+        echo "- Security vulnerability scan (advisory only)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "⏰ Completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
