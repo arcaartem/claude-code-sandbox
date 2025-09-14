@@ -1,18 +1,18 @@
 # Multi-stage build for Claude Code Development Environment
 # Stage 1: Build stage for tools that need compilation
-FROM alpine:3.22 AS builder
+FROM debian:bookworm-slim AS builder
 
 # Set shell to bash with pipefail for better error handling
-SHELL ["/bin/ash", "-o", "pipefail", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Install build dependencies
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     bash \
     curl \
     ca-certificates \
-    build-base \
+    build-essential \
     git \
-    && rm -rf /var/cache/apk/*
+    && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables for build
 ENV USER=developer \
@@ -21,8 +21,8 @@ ENV USER=developer \
     HOME=/home/developer
 
 # Create non-root user for building
-RUN addgroup -g ${GID} ${USER} && \
-    adduser -D -u ${UID} -G ${USER} -h ${HOME} -s /bin/bash ${USER}
+RUN groupadd -g ${GID} ${USER} && \
+    useradd -m -u ${UID} -g ${USER} -d ${HOME} -s /bin/bash ${USER}
 
 # Switch to non-root user
 USER ${USER}
@@ -34,10 +34,10 @@ RUN mkdir -p ${HOME}/.local/bin
 RUN curl https://mise.run | MISE_INSTALL_PATH=${HOME}/.local/bin/mise bash
 
 # Stage 2: Runtime stage
-FROM alpine:3.22 AS runtime
+FROM debian:bookworm-slim AS runtime
 
 # Set shell to bash with pipefail for better error handling
-SHELL ["/bin/ash", "-o", "pipefail", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Set environment variables
 ENV USER=developer \
@@ -47,53 +47,59 @@ ENV USER=developer \
     WORKSPACE=/workspace \
     PATH="/home/developer/.local/bin:$PATH"
 
-# Install runtime packages from Alpine repositories
-RUN apk add --no-cache \
+# Install runtime packages from Debian repositories
+RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     bash \
     curl \
     ca-certificates \
     make \
     gcc \
     g++ \
-    musl-dev \
+    libc6-dev \
     libffi-dev \
     openssl \
-    openssl-dev \
-    zlib \
-    zlib-dev \
-    bzip2-dev \
-    xz-dev \
-    sqlite-dev \
-    readline-dev \
-    ncurses-dev \
+    libssl-dev \
+    zlib1g \
+    zlib1g-dev \
+    libbz2-dev \
+    xz-utils \
+    libsqlite3-dev \
+    libreadline-dev \
+    libncurses-dev \
     tzdata \
     sudo \
-    shadow \
+    passwd \
     gnupg \
     tcl-dev \
     tk-dev \
-    gdbm-dev \
-    fortify-headers \
+    libgdbm-dev \
     patch \
     binutils \
-    && rm -rf /var/cache/apk/*
-
-# Add edge repositories for latest packages
-RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
-    echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
-    apk update && \
-    apk add --upgrade --no-cache \
-    busybox \
     git \
-    ssl_client \
-    && rm -rf /var/cache/apk/*
+    # Ruby build dependencies
+    autoconf \
+    bison \
+    libyaml-dev \
+    libreadline6-dev \
+    libncurses5-dev \
+    libffi-dev \
+    libgdbm6 \
+    libgdbm-dev \
+    libdb-dev \
+    # Additional build tools for better compatibility
+    pkg-config \
+    libxml2-dev \
+    libxslt1-dev \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create workspace directory
 RUN mkdir -p ${WORKSPACE}
 
 # Create non-root user with sudo access
-RUN addgroup -g ${GID} ${USER} && \
-    adduser -D -u ${UID} -G ${USER} -h ${HOME} -s /bin/bash ${USER} && \
+RUN groupadd -g ${GID} ${USER} && \
+    useradd -m -u ${UID} -g ${USER} -d ${HOME} -s /bin/bash ${USER} && \
     echo "${USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Copy mise from builder stage
@@ -116,7 +122,9 @@ RUN mkdir -p ${HOME}/.local/bin
 RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ${HOME}/.bashrc && \
     echo "eval \"\$(~/.local/bin/mise activate bash)\"" >> ${HOME}/.bashrc && \
     echo "export MAKEFLAGS=\"-j1\"" >> ${HOME}/.bashrc && \
-    echo "export NODE_OPTIONS=\"--max-old-space-size=4096\"" >> ${HOME}/.bashrc
+    echo "export NODE_OPTIONS=\"--max-old-space-size=4096\"" >> ${HOME}/.bashrc && \
+    echo "export RUBY_CONFIGURE_OPTS=\"--with-jemalloc\"" >> ${HOME}/.bashrc && \
+    echo "export RUBY_CFLAGS=\"-O3\"" >> ${HOME}/.bashrc
 
 # Initialize GPG with proper configuration (simplified approach)
 RUN mkdir -p ${HOME}/.gnupg && \

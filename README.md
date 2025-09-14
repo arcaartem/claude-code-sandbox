@@ -24,18 +24,18 @@ devenv
 
 ## ✨ Features
 
-- **🐧 Lightweight**: Alpine Linux 3.22 base with multi-stage build (~80MB total image size)
+- **🐧 Lightweight**: Debian Bookworm Slim base with multi-stage build (~150MB total image size)
 - **🤖 Claude Code Ready**: Pre-installed and ready to assist with development
 - **🛠️ Language Flexibility**: Pre-installed Node.js, Go, Rust + mise for Python and additional languages
 - **🔒 Safe Isolation**: Runs in container, can't affect your host system
 - **📁 Direct Access**: Current directory mounted as `/workspace`
 - **🎯 Portable**: Same command works in any project directory
-- **⚡ Fast Builds**: Multi-stage build with Alpine packages for faster, more reliable builds
+- **⚡ Fast Builds**: Multi-stage build with Debian packages for faster, more reliable builds
 - **🛡️ Security**: Proper GPG configuration and health checks
 
 ## 📋 What's Included
 
-- **Alpine Linux 3.22** - Latest stable, secure base with multi-stage build
+- **Debian Bookworm Slim** - Latest stable, secure base with multi-stage build
 - **mise** - Universal tool version manager (latest version)
 - **Claude Code** - AI-powered coding assistant (latest version)
 - **Pre-installed languages**: Node.js, Go, Rust
@@ -72,9 +72,9 @@ devenv-safe       # Starts Claude Code (no prompts, safe tools only)
 devenv-bash       # Starts bash shell
 ```
 
-## 🎛️ Auto-Setup with mise
+## 🎛️ Setup with mise
 
-Create a `.mise.toml` in your project root to automatically install tools:
+Create a `.mise.toml` in your project root to specify tools:
 
 ```toml
 [tools]
@@ -90,7 +90,7 @@ run = "npm run dev"
 description = "Start development server"
 ```
 
-The container will detect this file and install all specified tools automatically.
+Run `mise install` to install the specified tools.
 
 ## 📖 Example Workflows
 
@@ -98,6 +98,7 @@ The container will detect this file and install all specified tools automaticall
 ```bash
 cd my-node-app
 echo '[tools]\nnode = "20"' > .mise.toml
+mise install  # Install Node.js 20
 devenv  # Claude Code starts with Node.js 20 ready
 ```
 
@@ -105,6 +106,7 @@ devenv  # Claude Code starts with Node.js 20 ready
 ```bash
 cd my-python-project
 echo '[tools]\npython = "3.11"' > .mise.toml
+mise install  # Install Python 3.11
 devenv  # Claude Code starts with Python 3.11 ready
 ```
 
@@ -118,6 +120,7 @@ python = "3.11"
 go = "1.21"
 rust = "1.75"
 EOF
+mise install  # Install all specified tools
 devenv  # All languages available
 ```
 
@@ -188,4 +191,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [mise](https://mise.jdx.dev/) - Tool version manager
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) - AI-powered coding assistant
-- [Alpine Linux](https://alpinelinux.org/) - Lightweight Linux distribution
+- [Debian](https://www.debian.org/) - Stable, secure Linux distribution
