@@ -28,7 +28,7 @@ jobs:
         echo "tags=${{ env.IMAGE_NAME }}:ci-${{ github.sha }}" >> $GITHUB_OUTPUT
 
     - name: Build Docker image with cache
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         load: true
