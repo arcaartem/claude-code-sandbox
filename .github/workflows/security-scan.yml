@@ -99,7 +99,7 @@ jobs:
 
     # Grype scan with better configuration (advisory only)
     - name: Scan with Grype
-      uses: anchore/scan-action@v4
+      uses: anchore/scan-action@v7
       continue-on-error: true  # Don't fail the build
       id: grype-scan
       with:
