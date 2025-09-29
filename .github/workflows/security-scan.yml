@@ -129,7 +129,7 @@ jobs:
 
     # Hadolint with inline annotations (advisory only)
     - name: Run Hadolint Dockerfile linter
-      uses: hadolint/hadolint-action@v3.1.0
+      uses: hadolint/hadolint-action@v3.3.0
       continue-on-error: true  # Don't fail the build
       with:
         dockerfile: Dockerfile
